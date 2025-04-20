@@ -40,26 +40,65 @@ using namespace std;
 unsigned char* loadPixels(QString input, int &width, int &height);
 bool exportImage(unsigned char* pixelData, int width,int height, QString archivoSalida);
 unsigned int* loadSeedMasking(const char* nombreArchivo, int &seed, int &n_pixels);
+void xorChannel(unsigned char* pixelData, const unsigned char* otherData, int totalBytes);
+void shiftChannels(unsigned char* pixelData, int totalBytes, int shiftR, int shiftL);
+unsigned char rotateLeft(unsigned char byte, int count);
+unsigned char rotateRight(unsigned char byte, int count);
+void rotateImageChannels(unsigned char* pixelData, int totalBytes, int rotateAmount, bool toLeft);
+void shiftImageChannelsDirection(unsigned char* pixelData, int totalBytes, int shiftAmount, bool shiftToLeft);
+int* sumChannelsFromIndex(const unsigned char* original, int originalSize,
+                          const unsigned char* mask, int maskSize,
+                          int startIndex, int &overlapSize);
 int main()
 {
     // Definición de rutas de archivo de entrada (imagen original) y salida (imagen modificada)
     QString archivoEntrada = "I_O.bmp";
     QString archivoSalida = "I_D.bmp";
-
+    QString archivoI_M = "I_M.bmp";
+    QString mascara = "M.bmp";
     // Variables para almacenar las dimensiones de la imagen
     int height = 0;
     int width = 0;
-
+    int heightM = 0;
+    int widthM = 0;
     // Carga la imagen BMP en memoria dinámica y obtiene ancho y alto
     unsigned char *pixelData = loadPixels(archivoEntrada, width, height);
-
+    unsigned char *pixelDataI_M = loadPixels(archivoI_M, width, height);
+    unsigned char *pixelDataM = loadPixels(mascara, width, height);
     // Simula una modificación de la imagen asignando valores RGB incrementales
     // (Esto es solo un ejemplo de manipulación artificial)
-    for (int i = 0; i < width * height * 3; i += 3) {
-        pixelData[i] = i;     // Canal rojo
-        pixelData[i + 1] = i; // Canal verde
-        pixelData[i + 2] = i; // Canal azul
+    //for (int i = 0; i < width * height * 3; i += 3) {
+       // pixelData[i] = i;     // Canal rojo
+        //pixelData[i + 1] = i; // Canal verde
+       // pixelData[i + 2] = i; // Canal azul
+    //}
+
+    // Rotar cada canal de la imagen 3 bits a la izquierda
+    int totalBytes=width * height * 3;
+    int totalBytesM=widthM * heightM * 3;
+    //rotateImageChannels(pixelData, width * height * 3, 7, true);
+    //shiftImageChannelsDirection(pixelData, totalBytes, 2, false);
+    //xorChannel(pixelData,pixelDataI_M,totalBytes);
+    int startIndex = 100;
+
+    // Variable para recibir el tamaño de solapamiento
+    int overlapSize = 100;
+
+    // Llamamos a la función que realiza la suma
+    int* result = sumChannelsFromIndex(pixelData, totalBytes,
+                                       pixelDataM, totalBytesM,
+                                       startIndex, overlapSize);
+
+    // Mostrar resultados en consola:
+    cout << "Resultados (en el solapamiento de " << overlapSize << " bytes):" << endl;
+    for (int i = 0; i < overlapSize; ++i) {
+        cout << "Índice " << (startIndex + i) << " (original) + "
+             << "mask[" << i << "] = " << result[i] << endl;
     }
+
+    // Liberar la memoria dinámica asignada al arreglo resultado.
+    delete[] result;
+
 
     // Exporta la imagen modificada a un nuevo archivo BMP
     bool exportI = exportImage(pixelData, width, height, archivoSalida);
@@ -95,11 +134,67 @@ int main()
     return 0; // Fin del programa
 }
 
+
+
+// Función que suma canal a canal dos arreglos lineales (original y máscara),
+// comenzando desde 'startIndex' en el arreglo original.
+// Parámetros:
+//   original: arreglo de la imagen original.
+//   originalSize: tamaño (número total de bytes) del arreglo original.
+//   mask: arreglo de la máscara.
+//   maskSize: tamaño (número total de bytes) del arreglo de la máscara.
+//   startIndex: posición en el arreglo original a partir de la cual se realizará la suma.
+//   overlapSize (parámetro de salida): cantidad de elementos (bytes) en los que se realizó la suma.
+// La función retorna un arreglo dinámico de ints con los resultados de la suma.
+int* sumChannelsFromIndex(const unsigned char* original, int originalSize,
+                          const unsigned char* mask, int maskSize,
+                          int startIndex, int &overlapSize)
+{
+    // Calcular cuántos elementos (bytes) hay disponibles en el original a partir de startIndex.
+    int available = originalSize - startIndex;
+
+    // El área de solapamiento será el mínimo entre lo disponible en original y el tamaño de la máscara.
+    overlapSize = (available < maskSize) ? available : maskSize;
+
+    // Reservamos el arreglo de resultado (overlapSize elementos de tipo int).
+    int* result = new int[overlapSize];
+
+    // Sumamos canal a canal: para cada posición i en el solapamiento,
+    // se suma original[startIndex + i] + mask[i].
+    for (int i = 0; i < overlapSize; ++i) {
+        result[i] = static_cast<int>(original[startIndex + i]) +
+                    static_cast<int>(mask[i]);
+    }
+
+    return result;
+}
+
+
 void xorChannel(unsigned char* pixelData, const unsigned char* otherData, int totalBytes) {
     for (int i = 0; i < totalBytes; ++i) {
         pixelData[i] = pixelData[i] ^ otherData[i];
     }
 }
+
+// Función que desplaza cada canal de color en el arreglo pixelData.
+// Si shiftToLeft es true, se realiza un desplazamiento a la izquierda;
+// de lo contrario, se desplaza a la derecha.
+// shiftAmount indica cuántos bits se desplazarán (valor máximo 8).
+void shiftImageChannelsDirection(unsigned char* pixelData, int totalBytes, int shiftAmount, bool shiftToLeft) {
+    // Para cada byte (cada canal de cada píxel) se aplica el shift.
+    for (int i = 0; i < totalBytes; ++i) {
+        if (shiftToLeft) {
+            // Desplaza a la izquierda: los bits se mueven hacia los bits más significativos,
+            // y se rellenan con 0 los bits vacíos a la derecha. Los bits que se salen se pierden.
+            pixelData[i] = pixelData[i] << shiftAmount;
+        } else {
+            // Desplaza a la derecha: los bits se mueven hacia los bits menos significativos,
+            // y se rellenan con 0 a la izquierda. Los bits que se salen se descartan.
+            pixelData[i] = pixelData[i] >> shiftAmount;
+        }
+    }
+}
+
 
 void shiftChannels(unsigned char* pixelData, int totalBytes, int shiftR, int shiftL) {
     // Por ejemplo, aplicar un desplazamiento a la derecha en un canal específico:
